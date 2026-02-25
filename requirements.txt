@@ -1,0 +1,12 @@
+torch==2.10.0
+gradio
+diffusers
+transformers
+accelerate
+# xformers
+peft
+controlnet_aux==0.0.10
+huggingface_hub
+safetensors
+python-pptx
+piexif

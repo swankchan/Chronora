@@ -1,0 +1,6 @@
+outputs/*
+outputs_base/*
+outputs_juggernaut/*
+outputs_lightning/*
+__pycache__/*
+LoRAs/*
