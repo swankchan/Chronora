@@ -1,6 +1,11 @@
-outputs/*
+# Local env file
+.env
+
+# outputs
+outputs_base/outputs/*
 outputs_base/*
 outputs_juggernaut/*
 outputs_lightning/*
 __pycache__/*
 LoRAs/*
+.env

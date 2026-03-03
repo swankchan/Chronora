@@ -306,15 +306,60 @@ def process_modify(init_image, modify_prompt, negative_prompt, strength, resolut
     status_msg = f"Img2Img done | steps:{int(num_steps)} | {ms:.2f} ms | Saved: {filename}"
     return status_msg, [output]
 
-# 5. Gradio UI 介面
+# 5. Gradio UI 介面 — Readable Light/Dark Theme
 HEADING_AND_LABEL_CSS = """
-.gradio-container { background: #4a4a4a !important; }
-.gradio-container .block, .gradio-container .form, .gradio-container .panel { background: #4a4a4a !important; }
-#app-heading, #app-heading p, #app-heading * { font-size: 2.2rem !important; font-weight: 600 !important; color: #e0e0e0 !important; }
-.gradio-container label { font-size: 0.8rem !important; font-weight: 500 !important; color: #d0d0d0 !important; }
-.gradio-container .markdown p { color: #d8d8d8 !important; }
-.gradio-container input, .gradio-container textarea { background: #3a3a3a !important; color: #e8e8e8 !important; border: 1px solid #555 !important; outline: none !important; }
-.gradio-container select, .gradio-container [data-testid="dropdown"], .gradio-container .gr-box { background: #3a3a3a !important; color: #e8e8e8 !important; border: 1px solid #555 !important; outline: none !important; }
+/* Theme variables for accessibility (light by default) */
+:root {
+    --bg: #ffffff;
+    --panel: #ffffff;
+    --text: #0f172a;
+    --muted: #374151;
+    --accent: #3b82f6;
+    --accent-strong: #2563eb;
+    --input-bg: #f9fafb;
+    --input-border: rgba(100, 150, 255, 0.28);
+    --placeholder: #9ca3af;
+    --card-shadow: 0 0 12px rgba(100, 150, 255, 0.08);
+    --focus-glow: rgba(96,165,250,0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #071024;
+        --panel: #0b1624;
+        --text: #e6eef8;
+        --muted: #cbd5e1;
+        --accent: #60a5fa;
+        --accent-strong: #1e90ff;
+        --input-bg: #0b1220;
+        --input-border: rgba(60, 90, 140, 0.36);
+        --placeholder: #93a4b8;
+        --card-shadow: 0 6px 20px rgba(2,6,23,0.6);
+        --focus-glow: rgba(96,165,250,0.32);
+    }
+}
+
+.gradio-container.dark, .gradio-container[data-theme="dark"] {
+    --bg: #071024;
+    --panel: #0b1624;
+    --text: #e6eef8;
+    --muted: #cbd5e1;
+    --accent: #60a5fa;
+    --accent-strong: #1e90ff;
+    --input-bg: #0b1220;
+    --input-border: rgba(60, 90, 140, 0.36);
+    --placeholder: #93a4b8;
+    --card-shadow: 0 6px 20px rgba(2,6,23,0.6);
+    --focus-glow: rgba(96,165,250,0.32);
+}
+
+.gradio-container { background: var(--bg) !important; color: var(--text) !important; font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif !important; }
+.gradio-container .block, .gradio-container .form, .gradio-container .panel { background: var(--panel) !important; border-radius: 12px !important; border: 1px solid var(--input-border) !important; box-shadow: var(--card-shadow) !important; padding: 12px !important; }
+#app-heading, #app-heading p, #app-heading * { font-size: 1.9rem !important; font-weight: 700 !important; color: var(--text) !important; background: linear-gradient(135deg, rgba(219,234,254,0.65), rgba(224,242,254,0.65)) !important; padding: 0.6rem 1.25rem !important; border-radius: 10px !important; display:block !important; }
+.gradio-container label { font-size: 0.98rem !important; font-weight: 600 !important; color: var(--accent-strong) !important; }
+.gradio-container .markdown p { color: var(--muted) !important; }
+.gradio-container input, .gradio-container textarea { background: var(--input-bg) !important; color: var(--text) !important; border: 1px solid var(--input-border) !important; border-radius: 8px !important; padding: 10px 12px !important; }
+.gradio-container select, .gradio-container [data-testid="dropdown"], .gradio-container .gr-box { background: var(--input-bg) !important; color: var(--text) !important; border: 1px solid var(--input-border) !important; border-radius: 8px !important; padding: 8px 12px !important; }
 """
 
 with gr.Blocks(css=HEADING_AND_LABEL_CSS) as demo:

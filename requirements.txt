@@ -10,3 +10,9 @@ huggingface_hub
 safetensors
 python-pptx
 piexif
+fastapi
+uvicorn[standard]
+redis
+rq
+python-multipart
+python-dotenv

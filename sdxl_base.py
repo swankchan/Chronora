@@ -51,302 +51,198 @@ try:
     from controlnet_aux import HEDdetector
     hed = HEDdetector.from_pretrained("lllyasviel/Annotators")
     print("✅ HEDdetector 載入成功")
-except (ImportError, AttributeError) as e:
-    print(f"⚠️ HEDdetector 載入失敗: {e}")
-    try:
-        from controlnet_aux.hed import HEDdetector
-        hed = HEDdetector.from_pretrained("lllyasviel/Annotators")
-        print("✅ HEDdetector (替代路徑) 載入成功")
-    except Exception as e2:
-        print(f"❌ HEDdetector 載入完全失敗: {e2}")
-        hed = None
+# 5. UI - Readable Light & Dark Theme
+HEADING_AND_LABEL_CSS = """
+/* Theme variables for accessibility (light by default) */
+:root {
+    --bg: #ffffff;
+    --panel: #ffffff;
+    --text: #0f172a;
+    --muted: #374151;
+    --accent: #3b82f6;
+    --accent-strong: #2563eb;
+    --input-bg: #f9fafb;
+    --input-border: rgba(100, 150, 255, 0.28);
+    --placeholder: #9ca3af;
+    --card-shadow: 0 0 12px rgba(100, 150, 255, 0.08);
+    --focus-glow: rgba(96,165,250,0.45);
+}
 
-# 3. 純 SDXL Base 1.0（唔載入 Lightning）
-dtype = torch.float16 if has_accelerator else torch.float32
-
-controlnet = ControlNetModel.from_pretrained(
-    "diffusers/controlnet-canny-sdxl-1.0",
-    torch_dtype=dtype
-)
-
-# 只載入一次：主 pipeline 用純 Base 1.0
-print("📦 載入 SDXL Base 1.0（純 Base，唔用 Lightning）...")
-pipe_t2i = StableDiffusionXLPipeline.from_pretrained(
-    "stabilityai/stable-diffusion-xl-base-1.0",
-    torch_dtype=dtype,
-    variant="fp16" if has_accelerator else None
-)
-print("✅ SDXL Base 1.0 載入成功！")
-
-if has_accelerator:
-    try:
-        pipe_t2i.enable_model_cpu_offload()
-    except RuntimeError as e:
-        print(f"⚠️ CPU offload 失敗，改用直接載入到 {device}: {e}")
-        pipe_t2i = pipe_t2i.to(device)
-else:
-    pipe_t2i = pipe_t2i.to(device)
-
-# ControlNet 管道：共用組件
-print("⚡ 建立 ControlNet 管道（共用組件）...")
-pipe = StableDiffusionXLControlNetPipeline(
-    controlnet=controlnet,
-    **pipe_t2i.components
-)
-if not has_accelerator:
-    pipe = pipe.to(device)
-print("✅ ControlNet 管道就緒！")
-
-# Img2Img：延遲建立，共用組件
-pipe_img2img = None
-
-def get_pipe_img2img():
-    global pipe_img2img
-    if pipe_img2img is None:
-        print("⚡ 建立 Img2Img 管道（共用組件）...")
-        pipe_img2img = StableDiffusionXLImg2ImgPipeline(**pipe_t2i.components)
-        if not has_accelerator:
-            pipe_img2img = pipe_img2img.to(device)
-        pipe_img2img.enable_attention_slicing()
-        print("✅ Img2Img 管道就緒！")
-    return pipe_img2img
-
-# 4. 優化
-try:
-    pipe.enable_attention_slicing()
-    pipe_t2i.enable_attention_slicing()
-    print("✅ 記憶體優化已開啟")
-except Exception as e:
-    print("⚠️ 記憶體優化未能啟動")
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(BASE_DIR, "outputs_base")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-MODEL_ID = "stabilityai/stable-diffusion-xl-base-1.0"
-
-OUTPUT_FORMAT_CHOICES = [
-    ("PNG (lossless, stores prompt)", "png"),
-    ("JPEG (quality 100, EXIF Comment)", "jpeg"),
-    ("JPEG 2000 (lossless .jp2, comment in .jp2.txt)", "jp2"),
-    ("WebP (quality 90)", "webp"),
-]
-
-def _metadata_comment(prompt, negative_prompt, model_id, extra):
-    """統一代碼：生成 prompt/negative/model 嘅 comment 字串。"""
-    parts = [
-        f"prompt: {prompt or ''}",
-        f"negative_prompt: {negative_prompt or ''}",
-        f"model: {model_id}",
-    ]
-    if extra:
-        parts.append(extra)
-    return "\n".join(parts)
-
-def _jpeg_exif_bytes_with_comment(comment):
-    """Build EXIF UserComment bytes for JPEG. Uses piexif.helper if available, else manual ASCII encoding."""
-    if not HAS_PIEXIF:
-        return None
-    try:
-        if hasattr(piexif, "helper") and hasattr(piexif.helper, "UserComment"):
-            user_comment = piexif.helper.UserComment.dump(comment, encoding="unicode")
-        else:
-            # Older piexif without helper: EXIF UserComment = 8-byte charset + data (ASCII)
-            user_comment = b"ASCII\x00\x00\x00" + comment.encode("ascii", errors="replace")
-        exif_dict = {
-            "0th": {},
-            "Exif": {ExifIFD.UserComment: user_comment},
-            "GPS": {},
-            "1st": {},
-            "thumbnail": None,
-        }
-        return piexif.dump(exif_dict)
-    except Exception as e:
-        print(f"JPEG EXIF failed (using COM comment only): {e}")
-        return None
-
-def save_image_with_metadata(pil_image, save_path, prompt, negative_prompt, model_id=MODEL_ID, extra=None, output_ext="png"):
-    """按 output_ext 儲存為 PNG / JPEG / WebP；PNG 寫 Comment，JPEG 寫 EXIF UserComment。"""
-    comment = _metadata_comment(prompt, negative_prompt, model_id, extra)
-    img = pil_image.convert("RGB")
-    ext = output_ext.lower()
-    if ext == "png":
-        pnginfo = PngInfo()
-        pnginfo.add_text("Comment", comment)
-        pnginfo.add_text("parameters", comment)
-        img.save(save_path, pnginfo=pnginfo)
-    elif ext in ("jpg", "jpeg"):
-        exif_bytes = _jpeg_exif_bytes_with_comment(comment)
-        # 一定用 comment= 寫入 JPEG COM segment，exiftool 會顯示為 Comment
-        save_kw = {"quality": 100, "comment": comment}
-        if exif_bytes:
-            save_kw["exif"] = exif_bytes
-        img.save(save_path, "JPEG", **save_kw)
-    elif ext == "jp2":
-        # JPEG 2000 無損；Pillow 的 JP2 不支援 exif=，改寫 sidecar .txt 存 comment
-        try:
-            img.save(save_path, "JPEG2000", lossless=True)
-            sidecar_path = save_path + ".txt"
-            with open(sidecar_path, "w", encoding="utf-8") as f:
-                f.write(comment)
-        except Exception:
-            img.save(save_path, "PNG")  # fallback
-    elif ext == "webp":
-        img.save(save_path, "WEBP", quality=90)
-    else:
-        img.save(save_path)
-
-RESOLUTION_CHOICES = [
-    ("512 × 512", "512x512"),
-    ("512 × 768", "512x768"),
-    ("768 × 512", "768x512"),
-    ("768 × 1024", "768x1024"),
-    ("1024 × 768", "1024x768"),
-    ("1024 × 1024", "1024x1024"),
-    ("1280 × 1280", "1280x1280"),
-    ("1536 × 1024", "1536x1024"),
-    ("1024 × 1536", "1024x1536"),
-]
-
-def to_pil(img):
-    if img is None:
-        return None
-    if isinstance(img, Image.Image):
-        return img.convert("RGB")
-    if isinstance(img, np.ndarray):
-        return Image.fromarray(img).convert("RGB")
-    if isinstance(img, dict) and "composite" in img:
-        return img["composite"].convert("RGB")
-    return None
-
-def get_input_image(sketch_dict, upload_img):
-    if upload_img is not None:
-        return to_pil(upload_img)
-    if sketch_dict is not None and "composite" in sketch_dict and sketch_dict["composite"] is not None:
-        return sketch_dict["composite"].convert("RGB")
-    return None
-
-def process_sketch(sketch_dict, upload_img, prompt, negative_prompt, text_only, resolution_choice,
-                   num_steps, guidance_scale, controlnet_scale, batch_size, output_format):
-    if prompt == "":
-        return "Please enter a text prompt.", []
-
-    batch_size = int(batch_size) if batch_size else 1
-    if batch_size < 1:
-        batch_size = 1
-    if batch_size > 100:
-        return "Batch size must be 1–100.", []
-
-    if has_accelerator:
-        torch.cuda.empty_cache()
-    w, h = resolution_choice.split("x")
-    width, height = int(w), int(h)
-    composite_img = None if text_only else get_input_image(sketch_dict, upload_img)
-    start_time = time.time()
-
-    # 純 Base 1.0 參數：用 guidance_scale，步數 20-50
-    gen_kwargs = {
-        "num_inference_steps": int(num_steps),
-        "guidance_scale": float(guidance_scale),
-        "height": height,
-        "width": width
+/* Respect user's system preference for dark mode */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #071024;
+        --panel: #0b1624;
+        --text: #e6eef8;
+        --muted: #cbd5e1;
+        --accent: #60a5fa;
+        --accent-strong: #1e90ff;
+        --input-bg: #0b1220;
+        --input-border: rgba(60, 90, 140, 0.36);
+        --placeholder: #93a4b8;
+        --card-shadow: 0 6px 20px rgba(2,6,23,0.6);
+        --focus-glow: rgba(96,165,250,0.32);
     }
+}
 
-    if negative_prompt and negative_prompt.strip():
-        gen_kwargs["negative_prompt"] = negative_prompt.strip()
+/* Manual dark override */
+.gradio-container.dark, .gradio-container[data-theme="dark"] {
+    --bg: #071024;
+    --panel: #0b1624;
+    --text: #e6eef8;
+    --muted: #cbd5e1;
+    --accent: #60a5fa;
+    --accent-strong: #1e90ff;
+    --input-bg: #0b1220;
+    --input-border: rgba(60, 90, 140, 0.36);
+    --placeholder: #93a4b8;
+    --card-shadow: 0 6px 20px rgba(2,6,23,0.6);
+    --focus-glow: rgba(96,165,250,0.32);
+}
 
-    control_image = None
-    if composite_img is not None:
-        if hed is None:
-            return "HEDdetector not loaded; sketch mode unavailable.", []
-        control_resolution = min(1024, max(width, height))
-        control_image = hed(composite_img, detect_resolution=control_resolution, image_resolution=control_resolution)
-        gen_kwargs.update({
-            "image": control_image,
-            "controlnet_conditioning_scale": float(controlnet_scale)
-        })
+/* Apply base colors */
+.gradio-container {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    min-height: 100vh !important;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif !important;
+}
 
-    outputs = []
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    saved_files = []
+/* Panels */
+.gradio-container .block, .gradio-container .form, .gradio-container .panel {
+    background: var(--panel) !important;
+    border-radius: 12px !important;
+    border: 1px solid var(--input-border) !important;
+    backdrop-filter: blur(6px) !important;
+    box-shadow: var(--card-shadow) !important;
+    padding: 12px !important;
+}
 
-    print(f"🔄 開始批量生成 {batch_size} 張圖片（Base 1.0）...")
-    for i in range(batch_size):
-        print(f"   生成第 {i+1}/{batch_size} 張...")
+/* Heading */
+#app-heading, #app-heading p, #app-heading * {
+    font-size: 1.8rem !important;
+    font-weight: 700 !important;
+    color: var(--text) !important;
+    background: linear-gradient(135deg, rgba(219,234,254,0.65), rgba(224,242,254,0.65)) !important;
+    padding: 0.75rem 1.5rem !important;
+    border-radius: 12px !important;
+    margin-bottom: 1rem !important;
+    letter-spacing: 0.4px !important;
+    display: block !important;
+}
 
-        if composite_img is None:
-            result = pipe_t2i(prompt, **gen_kwargs)
-        else:
-            result = pipe(prompt, **gen_kwargs)
+/* Labels */
+.gradio-container label {
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    color: var(--accent-strong) !important;
+    text-transform: capitalize !important;
+}
 
-        output = result.images[0]
-        outputs.append(output)
+/* Markdown text */
+.gradio-container .markdown p {
+    color: var(--muted) !important;
+    font-size: 1rem !important;
+    line-height: 1.6 !important;
+}
 
-        ext = (output_format or "png").strip().lower()
-        if ext not in ("png", "jpg", "jpeg", "jp2", "webp"):
-            ext = "png"
-        if batch_size > 1:
-            filename = f"chronora_base_{timestamp}_{i+1:03d}.{ext}"
-        else:
-            filename = f"chronora_base_{timestamp}.{ext}"
-        save_path = os.path.join(OUTPUT_DIR, filename)
-        extra = f"steps: {int(num_steps)} | guidance_scale: {float(guidance_scale)}"
-        save_image_with_metadata(output, save_path, prompt, negative_prompt or "", model_id=MODEL_ID, extra=extra, output_ext=ext)
-        saved_files.append(filename)
+/* Inputs */
+.gradio-container input, .gradio-container textarea, .gradio-container .gradio-input {
+    background: var(--input-bg) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--input-border) !important;
+    border-radius: 8px !important;
+    padding: 10px 12px !important;
+    font-size: 1rem !important;
+    transition: box-shadow 0.18s ease, border-color 0.18s ease !important;
+}
 
-        if has_accelerator and (i + 1) % 5 == 0:
-            torch.cuda.empty_cache()
+.gradio-container input::placeholder, .gradio-container textarea::placeholder {
+    color: var(--placeholder) !important;
+}
 
-    end_time = time.time()
-    total_ms = (end_time - start_time) * 1000
-    total_sec = total_ms / 1000
-    avg_ms = total_ms / batch_size
-    mode = "Text only" if composite_img is None else "Sketch+text"
-    quality_info = f"steps:{int(num_steps)} | guidance:{float(guidance_scale):.1f} | Base 1.0"
+.gradio-container input:focus, .gradio-container textarea:focus, .gradio-container .gradio-input:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 18px var(--focus-glow) !important;
+    outline: none !important;
+}
 
-    if batch_size > 1:
-        status_msg = f"Done: {mode} | {batch_size} images | {quality_info} | {total_sec:.1f}s total | {avg_ms:.0f} ms/img | Saved: {saved_files[0]} (+{batch_size} files)"
-    else:
-        status_msg = f"Done: {mode} | {quality_info} | {total_ms:.2f} ms | Saved: {saved_files[0]}"
-    return status_msg, outputs
+/* Dropdowns */
+.gradio-container select, .gradio-container [data-testid="dropdown"], .gradio-container .gr-box {
+    background: var(--input-bg) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--input-border) !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    font-size: 1rem !important;
+    transition: box-shadow 0.18s ease, border-color 0.18s ease !important;
+}
 
-def process_modify(init_image, modify_prompt, negative_prompt, strength, resolution_choice, num_steps, guidance_scale, output_format):
-    img = to_pil(init_image)
-    if img is None:
-        return "Please upload an image to modify.", []
-    if not modify_prompt or not modify_prompt.strip():
-        return "Please enter a modify prompt.", []
+.gradio-container select:hover, .gradio-container [data-testid="dropdown"]:hover {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 12px var(--focus-glow) !important;
+}
 
-    w, h = resolution_choice.split("x")
-    width, height = int(w), int(h)
-    img = img.resize((width, height), Image.Resampling.LANCZOS)
+.gradio-container select:focus, .gradio-container [data-testid="dropdown"]:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 20px var(--focus-glow) !important;
+    outline: none !important;
+}
 
-    start_time = time.time()
-    if has_accelerator:
-        torch.cuda.empty_cache()
-    p = get_pipe_img2img()
-    kwargs = {
-        "prompt": modify_prompt.strip(),
-        "image": img,
-        "strength": float(strength),
-        "num_inference_steps": int(num_steps),
-        "guidance_scale": float(guidance_scale)  # Base 1.0 用返 guidance
-    }
-    if negative_prompt and negative_prompt.strip():
-        kwargs["negative_prompt"] = negative_prompt.strip()
-    output = p(**kwargs).images[0]
+/* Dropdown menu & options (Gradio custom menus) */
+.gradio-container .dropdown-menu {
+    background: var(--panel) !important;
+    border: 1px solid var(--input-border) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.15) !important;
+}
 
-    ext = (output_format or "png").strip().lower()
-    if ext not in ("png", "jpg", "jpeg", "jp2", "webp"):
-        ext = "png"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"chronora_base_mod_{timestamp}.{ext}"
-    save_path = os.path.join(OUTPUT_DIR, filename)
-    extra = f"steps: {int(num_steps)} | guidance_scale: {float(guidance_scale)} | strength: {float(strength)}"
-    save_image_with_metadata(output, save_path, modify_prompt.strip(), negative_prompt or "", model_id=MODEL_ID, extra=extra, output_ext=ext)
+.gradio-container [role="option"] {
+    background: var(--panel) !important;
+    color: var(--text) !important;
+    padding: 10px 12px !important;
+}
+.gradio-container [role="option"]:hover, .gradio-container [role="option"][aria-selected="true"] {
+    background: rgba(219,234,254,0.14) !important;
+}
 
-    ms = (time.time() - start_time) * 1000
-    status_msg = f"Img2Img done | steps:{int(num_steps)} | guidance:{float(guidance_scale):.1f} | {ms:.2f} ms | Saved: {filename}"
+/* Buttons */
+.gradio-container button[variant="primary"] {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%) !important;
+    color: #ffffff !important;
+    border: 1px solid transparent !important;
+    border-radius: 8px !important;
+    padding: 10px 20px !important;
+    font-weight: 600 !important;
+    font-size: 1rem !important;
+    box-shadow: 0 6px 20px rgba(37,99,235,0.12) !important;
+}
+
+.gradio-container button[variant="secondary"] {
+    background: rgba(96,165,250,0.08) !important;
+    color: var(--accent) !important;
+    border: 1px solid var(--input-border) !important;
+    border-radius: 8px !important;
+    padding: 10px 18px !important;
+    font-weight: 600 !important;
+}
+
+/* Gallery */
+#gallery, .gradio-container .gallery {
+    border-radius: 8px !important;
+    border: 1px solid var(--input-border) !important;
+    background: var(--panel) !important;
+}
+
+/* Misc adjustments for readability */
+.gradio-container .tab-nav button, .gradio-container label, .gradio-container .markdown h1, .gradio-container .markdown h2 {
+    text-shadow: none !important;
+}
+
+.gradio-container *::-webkit-scrollbar { width: 8px !important; height: 8px !important; }
+.gradio-container *::-webkit-scrollbar-track { background: transparent !important; }
+.gradio-container *::-webkit-scrollbar-thumb { background: linear-gradient(180deg, rgba(100,150,255,0.3), rgba(96,165,250,0.5)) !important; border-radius: 4px !important; }
+"""
     return status_msg, [output]
 
 # 5. UI
