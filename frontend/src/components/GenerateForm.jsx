@@ -1,7 +1,7 @@
 import React, { useState } from "react"
 
 // API base (can be set in Vite env as VITE_API_BASE). Default to backend on localhost:8000.
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
+const API_BASE = (window.__env__ && window.__env__.VITE_API_BASE) || import.meta.env.VITE_API_BASE || "http://localhost:8000"
 
 const RESOLUTIONS = [
   "256 × 256",

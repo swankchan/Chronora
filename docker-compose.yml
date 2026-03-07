@@ -1,0 +1,45 @@
+version: '3.8'
+services:
+  redis:
+    image: redis:7
+    container_name: chronora-redis
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: .
+    container_name: chronora-backend
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - FRONTEND_ORIGINS=${FRONTEND_ORIGINS:-http://localhost:5173}
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./:/app
+
+  worker:
+    build: .
+    container_name: chronora-worker
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    command: rq worker default
+    volumes:
+      - ./:/app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: chronora-frontend
+    environment:
+      - VITE_API_BASE=${VITE_API_BASE:-http://localhost:8001}
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+# Note: Frontend is served as static on port 80 inside container, mapped to 5173 on host

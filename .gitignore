@@ -1,6 +1,6 @@
 # Local env file
 .env
-
+frontend/node_modules/*
 # outputs
 outputs_base/outputs/*
 outputs_base/*

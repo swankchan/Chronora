@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react"
 import GenerateForm from "./components/GenerateForm"
 import ResultsGallery from "./components/ResultsGallery"
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
+const API_BASE = (window.__env__ && window.__env__.VITE_API_BASE) || import.meta.env.VITE_API_BASE || "http://localhost:8000"
 
 export default function App() {
   const [jobId, setJobId] = useState(null)

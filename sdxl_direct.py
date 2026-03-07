@@ -66,8 +66,8 @@ async def api_generate(
         raise HTTPException(status_code=400, detail="prompt is required")
 
     # validate basic limits
-    if batch_size < 1 or batch_size > 10:
-        raise HTTPException(status_code=400, detail="batch_size must be 1..10")
+    if batch_size < 1 or batch_size > 100:
+        raise HTTPException(status_code=400, detail="batch_size must be 1..100")
 
     try:
         w, h = resolution.lower().split("x")
@@ -143,4 +143,4 @@ def job_status(job_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("sdxl_direct:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("sdxl_direct:app", host="0.0.0.0", port=8001, reload=False)
