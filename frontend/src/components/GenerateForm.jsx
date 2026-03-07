@@ -141,7 +141,7 @@ export default function GenerateForm({ onAccepted }) {
         </div>
         <div>
           <label>Batch</label>
-          <input type="number" min={1} max={10} value={batchSize} onChange={e => setBatchSize(Number(e.target.value))} />
+          <input type="number" min={1} max={100} value={batchSize} onChange={e => setBatchSize(Number(e.target.value))} />
         </div>
       </div>
 

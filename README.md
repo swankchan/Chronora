@@ -15,7 +15,7 @@ CLI API Call:
   -F "resolution=1024x1024" \
   -F "steps=30" \
   -F "guidance_scale=7.5" \
-  -F "batch_size=10" \
+  -F "batch_size=100" \
   -F "output_format=png"
 
 
